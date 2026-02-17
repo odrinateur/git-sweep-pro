@@ -2,6 +2,10 @@
   "name": "git-sweep-pro",
   "displayName": "Git Sweep Pro",
   "description": "Safely identify and prune local branches that are gone on the remote.",
+  "repository": {
+    "url": "git+https://github.com/MAXOUXAX/git-sweep-pro",
+    "type": "git"
+  },
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.109.0"
