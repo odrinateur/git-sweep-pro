@@ -6,6 +6,8 @@
     "url": "git+https://github.com/MAXOUXAX/git-sweep-pro",
     "type": "git"
   },
+  "publisher": "MAXOUXAX",
+  "icon": "assets/icon.png",
   "version": "0.1.0",
   "engines": {
     "vscode": "^1.109.0"
