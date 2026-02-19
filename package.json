@@ -37,7 +37,7 @@
       },
       {
         "command": "git-sweep-pro.syncWithUpstreamResume",
-        "title": "Git Sweep Pro: Sync With Upstream (Reprendre)"
+        "title": "Git Sweep Pro: Sync With Upstream (Resume)"
       }
     ]
   },
