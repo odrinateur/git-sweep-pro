@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { runGitCommand } from './core/git-command';
+import { runPostPullRequestWorkflow } from './core/post-pull-request-workflow';
 import { resolveSweepModeAction } from './core/sweep-logic';
 import { runSweepWorkflow, type SweepWorkflowDeps } from './core/sweep-workflow';
 import { resolveWorkspaceRoot } from './core/workspace';
@@ -18,8 +19,8 @@ export function activate(context: vscode.ExtensionContext) {
 	const outputChannel = vscode.window.createOutputChannel(OUTPUT_CHANNEL_NAME);
 
 	const createSweepDeps = (): SweepWorkflowDeps => {
-		const runGitCommandForWorkflow: SweepWorkflowDeps['runGitCommand'] = (command, cwd) =>
-			runGitCommand(command, cwd, outputChannel);
+		const runGitCommandForWorkflow: SweepWorkflowDeps['runGitCommand'] = (args, cwd) =>
+			runGitCommand(args, cwd, outputChannel);
 
 		return {
 			getWorkspaceRoot,
@@ -70,7 +71,14 @@ export function activate(context: vscode.ExtensionContext) {
 		await runSweepWorkflow({ dryRun: true, forceDelete: false }, createSweepDeps());
 	});
 
-	context.subscriptions.push(outputChannel, runCommand, dryRunCommand);
+    const postPullRequestCommand = vscode.commands.registerCommand(
+        "git-sweep-pro.postPullRequest",
+        async () => {
+            await runPostPullRequestWorkflow(createSweepDeps());
+        },
+    );
+
+    context.subscriptions.push(outputChannel, runCommand, dryRunCommand, postPullRequestCommand);
 }
 
 export function deactivate() {}

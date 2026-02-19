@@ -8,7 +8,7 @@
   },
   "publisher": "MAXOUXAX",
   "icon": "assets/icon.png",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -26,6 +26,10 @@
       {
         "command": "git-sweep-pro.dryRun",
         "title": "Git Sweep Pro: Dry Run"
+      },
+      {
+        "command": "git-sweep-pro.postPullRequest",
+        "title": "Git Sweep Pro: Post Pull Request"
       }
     ]
   },
