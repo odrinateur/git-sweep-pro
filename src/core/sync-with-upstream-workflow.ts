@@ -90,8 +90,12 @@ async function runSyncFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 		let hasStash = false;
 
 		try {
-			const stashResult = await runGit(['stash', 'push', '-u', '-m', 'gsp-sync-with-upstream']);
-			hasStash = !stashResult.stdout.includes('No local changes to save');
+			const stashListBefore = await runGit(['stash', 'list']);
+			await runGit(['stash', 'push', '-u', '-m', 'gsp-sync-with-upstream']);
+			const stashListAfter = await runGit(['stash', 'list']);
+			const countBefore = stashListBefore.stdout.trim().split('\n').filter((l) => l.length > 0).length;
+			const countAfter = stashListAfter.stdout.trim().split('\n').filter((l) => l.length > 0).length;
+			hasStash = countAfter > countBefore;
 		} catch {
 			deps.output.appendLine(syncMessages.infoNoStash);
 		}
