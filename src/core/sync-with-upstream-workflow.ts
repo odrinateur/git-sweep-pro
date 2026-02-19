@@ -381,12 +381,11 @@ async function runResumeFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 			() => runGit(['push', '--force-with-lease'])
 		);
 	} catch (pushError) {
-		deps.ui.showErrorMessage(
-			syncMessages.rebaseOkPushFailed(
-				pushError instanceof Error ? pushError.message : String(pushError)
-			)
-		);
-		throw pushError;
+		const msg = pushError instanceof Error ? pushError.message : String(pushError);
+		deps.ui.showErrorMessage(syncMessages.rebaseOkPushFailed(msg));
+		deps.output.appendLine(`[error] ${msg}`);
+		deps.output.appendLine(syncMessages.outputFailed);
+		return;
 	}
 
 	if (tempBranchToCleanup) {

@@ -17,8 +17,10 @@ type HarnessOptions = {
 	git?: Record<string, GitEntry | GitEntry[]>;
 	/** Return true for .git dir, false for rebase-merge/rebase-apply. Omit to default to false. */
 	fileExists?: (path: string) => boolean;
-	/** When set, runGitCommand will set .current=true when a rebase (non-continue) command runs. Use with stateful fileExists for conflict tests. */
+		/** When set, runGitCommand will set .current=true when a rebase (non-continue) command runs. Use with stateful fileExists for conflict tests. */
 	rebaseAttemptedRef?: { current: boolean };
+	/** When set, runGitCommand will set .current=true when 'rebase --continue' runs. Use with stateful fileExists for resume push-failure tests. */
+	rebaseContinueRanRef?: { current: boolean };
 	readFileUtf8?: (path: string) => string;
 	memento?: SyncMemento | undefined;
 };
@@ -73,6 +75,9 @@ function createHarness(options: HarnessOptions = {}): Harness {
 			const key = args.join(' ');
 			if (options.rebaseAttemptedRef && key.startsWith('rebase ') && !key.includes('--continue')) {
 				options.rebaseAttemptedRef.current = true;
+			}
+			if (options.rebaseContinueRanRef && key === 'rebase --continue') {
+				options.rebaseContinueRanRef.current = true;
 			}
 			commands.push(key);
 			const entry = resolveGitEntry(key);
@@ -594,6 +599,32 @@ suite('sync-with-upstream workflow', () => {
 			assert.ok(!h.commands.includes('push --force-with-lease'));
 		});
 
+		test('resume with rebase in progress: rebase --continue succeeds but push fails, memento not cleared', async () => {
+			const rebaseContinueRanRef = { current: false };
+			const h = createHarness({
+				workspaceRoot: '/repo',
+				rebaseContinueRanRef,
+				fileExists: (p) =>
+					!rebaseContinueRanRef.current &&
+					(p.includes('rebase-merge') || p.includes('rebase-apply')),
+				readFileUtf8: (p) => (p.includes('head-name') ? 'refs/heads/feature/my-branch' : ''),
+				memento: undefined,
+				git: {
+					'rev-parse --absolute-git-dir': { stdout: '/repo/.git' },
+					'rebase --continue': { stdout: '' },
+					'push --force-with-lease': new Error('rejected: failed to push'),
+				},
+			});
+			await runSyncWithUpstreamResumeWorkflow(h.deps);
+
+			assert.ok(h.commands.includes('rebase --continue'));
+			assert.ok(h.commands.includes('push --force-with-lease'));
+			assert.ok(h.errorMessages.some((m) => m.includes('failed to push')));
+			assert.ok(h.outputLines.some((l) => l.includes('[error]') && l.includes('failed to push')));
+			assert.ok(h.outputLines.includes(syncMessages.outputFailed));
+			assert.ok(!h.mementoUpdates.some((u) => u.key === MEMENTO_KEY && u.value === undefined));
+		});
+
 		test('resume errors when memento exists but featureBranch missing and no rebase head', async () => {
 			const h = createHarness({
 				workspaceRoot: '/repo',
@@ -622,12 +653,13 @@ suite('sync-with-upstream workflow', () => {
 				},
 			});
 
-			await assert.rejects(
-				async () => runSyncWithUpstreamResumeWorkflow(h.deps),
-				(err: Error) => err.message.includes('failed to push')
+			await assert.doesNotReject(
+				async () => runSyncWithUpstreamResumeWorkflow(h.deps)
 			);
 
 			assert.ok(h.errorMessages.some((m) => m.includes('failed to push')));
+			assert.ok(h.outputLines.some((l) => l.includes('[error]') && l.includes('failed to push')));
+			assert.ok(h.outputLines.includes(syncMessages.outputFailed));
 			assert.ok(!h.mementoUpdates.some((u) => u.key === MEMENTO_KEY && u.value === undefined));
 		});
 	});
