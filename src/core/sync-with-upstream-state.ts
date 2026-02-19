@@ -48,8 +48,16 @@ export function readRebaseHeadName(gitDir: string, deps: SyncWithUpstreamDeps): 
 
 	for (const p of headNamePaths) {
 		if (deps.fileExists(p)) {
-			const content = deps.readFileUtf8(p).trim();
-			return content.startsWith('refs/heads/') ? content.replace(/^refs\/heads\//, '') : content;
+			try {
+				const content = deps.readFileUtf8(p).trim();
+				return content.startsWith('refs/heads/') ? content.replace(/^refs\/heads\//, '') : content;
+			} catch (err) {
+				const code = (err as NodeJS.ErrnoException).code;
+				if (code === 'ENOENT' || code === 'ENOTDIR') {
+					return undefined;
+				}
+				throw err;
+			}
 		}
 	}
 	return undefined;
