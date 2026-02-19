@@ -284,7 +284,7 @@ suite('sync-with-upstream workflow', () => {
 			assert.ok(h.outputLines.includes(syncMessages.outputComplete));
 		});
 
-		test('success path with remote branch: creates temp branch, pulls, rebases, deletes temp', async () => {
+		test('success path with remote branch: creates temp branch, pulls, rebases, skips local update when main exists', async () => {
 			const h = createHarness({
 				workspaceRoot: '/repo',
 				fileExists: fileExistsGitOnly,
@@ -298,7 +298,7 @@ suite('sync-with-upstream workflow', () => {
 					'rebase __gsp_sync_origin_main': { stdout: '' },
 					'push --force-with-lease': { stdout: '' },
 					'branch -D __gsp_sync_origin_main': { stdout: '' },
-					'branch -f main origin/main': { stdout: '' },
+					'rev-parse --verify refs/heads/main': { stdout: 'abc123' },
 				},
 			});
 			await runSyncWithUpstreamWorkflow(h.deps);
@@ -307,8 +307,58 @@ suite('sync-with-upstream workflow', () => {
 			assert.ok(h.commands.includes('pull origin main'));
 			assert.ok(h.commands.includes('rebase __gsp_sync_origin_main'));
 			assert.ok(h.commands.includes('branch -D __gsp_sync_origin_main'));
-			assert.ok(h.commands.includes('branch -f main origin/main'));
+			assert.ok(h.commands.includes('rev-parse --verify refs/heads/main'));
+			assert.ok(!h.commands.some((c) => c.includes('branch -f')), 'should not force-update local branch');
+			assert.ok(h.outputLines.some((l) => l.includes(syncMessages.infoUpdateSkippedExisting('main'))));
+		});
+
+		test('success path with remote branch: creates local branch when it does not exist', async () => {
+			const h = createHarness({
+				workspaceRoot: '/repo',
+				fileExists: fileExistsGitOnly,
+				quickPickSelection: { label: 'origin/main (remote)' },
+				git: {
+					...baseGitForSync,
+					'status --porcelain -u': { stdout: '' },
+					'checkout -B __gsp_sync_origin_main origin/main': { stdout: '' },
+					'pull origin main': { stdout: '' },
+					'checkout feature/my-branch': { stdout: '' },
+					'rebase __gsp_sync_origin_main': { stdout: '' },
+					'push --force-with-lease': { stdout: '' },
+					'branch -D __gsp_sync_origin_main': { stdout: '' },
+					'rev-parse --verify refs/heads/main': new Error('not a valid ref'),
+					'branch main origin/main': { stdout: '' },
+				},
+			});
+			await runSyncWithUpstreamWorkflow(h.deps);
+
+			assert.ok(h.commands.includes('branch main origin/main'));
+			assert.ok(!h.commands.some((c) => c.includes('branch -f')), 'should not force-update');
 			assert.ok(h.outputLines.some((l) => l.includes(syncMessages.infoLocalBranchSynced('main', 'origin/main'))));
+		});
+
+		test('success path with remote branch: skips update when syncing branch equals local upstream', async () => {
+			const h = createHarness({
+				workspaceRoot: '/repo',
+				fileExists: fileExistsGitOnly,
+				quickPickSelection: { label: 'origin/main (remote)' },
+				git: {
+					...baseGitForSync,
+					'rev-parse --abbrev-ref HEAD': { stdout: 'main' },
+					'status --porcelain -u': { stdout: '' },
+					'checkout -B __gsp_sync_origin_main origin/main': { stdout: '' },
+					'pull origin main': { stdout: '' },
+					'checkout main': { stdout: '' },
+					'rebase __gsp_sync_origin_main': { stdout: '' },
+					'push --force-with-lease': { stdout: '' },
+					'branch -D __gsp_sync_origin_main': { stdout: '' },
+				},
+			});
+			await runSyncWithUpstreamWorkflow(h.deps);
+
+			assert.ok(!h.commands.some((c) => c.includes('rev-parse --verify refs/heads/main')));
+			assert.ok(!h.commands.some((c) => c.includes('branch main') || c.includes('branch -f')));
+			assert.ok(h.outputLines.some((l) => l.includes(syncMessages.infoUpdateSkippedSameBranch('main'))));
 		});
 
 		test('conflict path: rebase fails with conflict, saves memento and pauses', async () => {

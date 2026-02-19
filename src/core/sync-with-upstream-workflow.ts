@@ -33,6 +33,11 @@ async function runSyncFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 
 	const runGit = (args: string[]) => deps.runGitCommand(args, workspaceRoot);
 
+	let featureBranch: string | undefined;
+	let hasStash = false;
+	let tempBranchToCleanup: string | undefined;
+	let skipOuterCleanup = false;
+
 	try {
 		await deps.ui.withProgress(
 			{ title: syncMessages.fetchingRemotes },
@@ -44,7 +49,7 @@ async function runSyncFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 			runGit(['branch', '-a']),
 		]);
 
-		const featureBranch = currentBranchResult.stdout.trim();
+		featureBranch = currentBranchResult.stdout.trim();
 		if (!featureBranch || featureBranch === 'HEAD') {
 			deps.ui.showErrorMessage(syncMessages.couldNotDetermineBranch);
 			return;
@@ -87,7 +92,6 @@ async function runSyncFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 		}
 
 		const upstreamRef = targetItem.ref;
-		let hasStash = false;
 
 		const statusResult = await runGit(['status', '--porcelain', '-u']).catch(() => ({ stdout: '', stderr: '' }));
 		const hasLocalChanges = statusResult.stdout.trim().length > 0;
@@ -111,6 +115,7 @@ async function runSyncFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 				{ title: syncMessages.creatingTempBranch(upstreamRef) },
 				() => runGit(['checkout', '-B', tempBranch, upstreamRef])
 			);
+			tempBranchToCleanup = tempBranch;
 
 			try {
 				const slashIdx = upstreamRef.indexOf('/');
@@ -142,8 +147,8 @@ async function runSyncFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 		}
 
 		await deps.ui.withProgress(
-			{ title: syncMessages.returningTo(featureBranch) },
-			() => runGit(['checkout', featureBranch])
+			{ title: syncMessages.returningTo(featureBranch!) },
+			() => runGit(['checkout', featureBranch!])
 		);
 
 		try {
@@ -209,6 +214,7 @@ async function runSyncFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 			}
 
 			deps.ui.showErrorMessage(syncMessages.pushFailed(msg));
+			skipOuterCleanup = true;
 			throw pushError;
 		}
 
@@ -220,11 +226,25 @@ async function runSyncFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 			}
 			const slashIdx = upstreamRef.indexOf('/');
 			const localUpstream = slashIdx > 0 ? upstreamRef.slice(slashIdx + 1) : upstreamRef;
-			try {
-				await runGit(['branch', '-f', localUpstream, upstreamRef]);
-				deps.output.appendLine(syncMessages.infoLocalBranchSynced(localUpstream, upstreamRef));
-			} catch {
-				deps.output.appendLine(syncMessages.infoUpdateSkipped(localUpstream));
+
+			// Avoid force-updating: never touch the branch we just synced, and only create
+			// if the local branch doesn't exist (no -f to prevent discarding local commits).
+			if (localUpstream === featureBranch) {
+				deps.output.appendLine(syncMessages.infoUpdateSkippedSameBranch(localUpstream));
+			} else {
+				const branchExists = await runGit(['rev-parse', '--verify', `refs/heads/${localUpstream}`])
+					.then(() => true)
+					.catch(() => false);
+				if (branchExists) {
+					deps.output.appendLine(syncMessages.infoUpdateSkippedExisting(localUpstream));
+				} else {
+					try {
+						await runGit(['branch', localUpstream, upstreamRef]);
+						deps.output.appendLine(syncMessages.infoLocalBranchSynced(localUpstream, upstreamRef));
+					} catch {
+						deps.output.appendLine(syncMessages.infoUpdateSkipped(localUpstream));
+					}
+				}
 			}
 		}
 
@@ -243,6 +263,35 @@ async function runSyncFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 		deps.output.appendLine(syncMessages.outputComplete);
 		deps.ui.showInformationMessage(syncMessages.syncedWith(featureBranch, upstreamRef));
 	} catch (error) {
+		if (!skipOuterCleanup) {
+			deps.output.appendLine(syncMessages.infoCleanupAttempted);
+			if (featureBranch) {
+				try {
+					await runGit(['checkout', featureBranch]);
+				} catch {
+					/* best-effort */
+				}
+			}
+			if (tempBranchToCleanup) {
+				try {
+					await runGit(['branch', '-D', tempBranchToCleanup]);
+				} catch {
+					deps.output.appendLine(syncMessages.infoTempBranchNotDeleted(tempBranchToCleanup));
+				}
+			}
+			if (hasStash) {
+				try {
+					await runGit(['stash', 'pop']);
+				} catch {
+					const listResult = await runGit(['stash', 'list']).catch(() => ({ stdout: '' }));
+					const line = listResult.stdout.split('\n').find((l) => l.includes('gsp-sync-with-upstream'));
+					const match = line?.match(/^(stash@\{\d+\})/);
+					const ref = match?.[1] ?? 'stash@{0}';
+					deps.output.appendLine(syncMessages.infoStashRefOnFailure(ref));
+				}
+			}
+		}
+
 		const message = error instanceof Error ? error.message : String(error);
 		const lowerMessage = message.toLowerCase();
 

@@ -55,7 +55,14 @@ export const syncMessages = {
 	infoTempBranchNotDeleted: (branch: string) => `[info] Temporary branch ${branch} not deleted.`,
 	infoLocalBranchSynced: (local: string, remote: string) => `Local branch ${local} synced with ${remote}.`,
 	infoUpdateSkipped: (branch: string) => `[info] Update of ${branch} skipped.`,
+	infoUpdateSkippedSameBranch: (branch: string) =>
+		`[info] Skipping local branch update: ${branch} is the synced branch.`,
+	infoUpdateSkippedExisting: (branch: string) =>
+		`[info] Skipping local branch update: ${branch} exists (would discard local commits). Create manually if needed.`,
 	infoNoRebaseInProgress:
 		'[info] No rebase in progress (already completed manually?). Proceeding to push and cleanup.',
 	infoStateSavedForResume: '[info] State saved. Run "Sync With Upstream (Resume)" to retry push.',
+	infoStashRefOnFailure: (ref: string) =>
+		`[info] Stash not restored. Recover manually: git stash list, then git stash apply ${ref} or git stash pop ${ref}`,
+	infoCleanupAttempted: '[info] Attempting cleanup after error...',
 } as const;
