@@ -283,10 +283,10 @@ async function runResumeFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 		deps.ui.showInformationMessage(syncMessages.noRebaseNothingToResume);
 		deps.output.appendLine(syncMessages.nothingToResume);
 		return;
-	}
-
-	if (rebaseActive && memento && memento.workspaceRoot !== workspaceRoot) {
-		deps.ui.showErrorMessage(syncMessages.rebaseInOtherWorkspace);
+	if (memento && memento.workspaceRoot !== workspaceRoot) {
+		deps.ui.showErrorMessage(
+			'Git Sweep Pro: Un rebase est en cours dans un autre workspace. Ouvrez le bon dossier.'
+		);
 		return;
 	}
 
