@@ -30,6 +30,14 @@
       {
         "command": "git-sweep-pro.postPullRequest",
         "title": "Git Sweep Pro: Post Pull Request"
+      },
+      {
+        "command": "git-sweep-pro.syncWithUpstream",
+        "title": "Git Sweep Pro: Sync With Upstream"
+      },
+      {
+        "command": "git-sweep-pro.syncWithUpstreamResume",
+        "title": "Git Sweep Pro: Sync With Upstream (Reprendre)"
       }
     ]
   },
