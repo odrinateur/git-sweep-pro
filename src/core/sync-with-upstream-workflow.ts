@@ -27,6 +27,11 @@ async function runSyncFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 		return;
 	}
 
+	if (isRebaseInProgress(gitDir, deps)) {
+		deps.ui.showInformationMessage(syncMessages.rebaseAlreadyInProgress);
+		return;
+	}
+
 	deps.output.show(true);
 	deps.output.appendLine(syncMessages.outputHeader);
 	deps.output.appendLine(`Workspace: ${workspaceRoot}`);
@@ -357,7 +362,7 @@ async function runResumeFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 			);
 		} catch (continueError) {
 			const msg = continueError instanceof Error ? continueError.message : String(continueError);
-			if (msg.toLowerCase().includes('conflict') || msg.toLowerCase().includes('could not apply')) {
+			if (isRebaseInProgress(gitDir, deps)) {
 				deps.ui.showErrorMessage(syncMessages.remainingConflicts);
 				deps.output.appendLine(`[error] ${msg}`);
 				return;
@@ -410,14 +415,6 @@ async function runResumeFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 }
 
 export async function runSyncWithUpstreamWorkflow(deps: SyncWithUpstreamDeps): Promise<void> {
-	const workspaceRoot = deps.getWorkspaceRoot();
-	if (workspaceRoot) {
-		const gitDir = await resolveGitDir(workspaceRoot, deps);
-		if (gitDir && isRebaseInProgress(gitDir, deps)) {
-			deps.ui.showInformationMessage(syncMessages.rebaseAlreadyInProgress);
-			return;
-		}
-	}
 	await runSyncFlow(deps);
 }
 

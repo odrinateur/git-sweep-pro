@@ -231,36 +231,13 @@ suite('sync-with-upstream workflow', () => {
 			assert.ok(h.commands.includes('fetch -p'));
 			assert.ok(h.commands.includes('status --porcelain -u'));
 			assert.ok(!h.commands.includes('stash push -u -m gsp-sync-with-upstream'));
+			assert.ok(!h.commands.includes('stash pop'));
 			assert.ok(h.commands.includes('checkout main'));
 			assert.ok(h.commands.includes('pull'));
 			assert.ok(h.commands.includes('checkout feature/my-branch'));
 			assert.ok(h.commands.includes('rebase main'));
 			assert.ok(h.commands.includes('push --force-with-lease'));
 			assert.ok(h.outputLines.includes(syncMessages.outputComplete));
-		});
-
-		test('success path without stash (nothing to stash)', async () => {
-			const h = createHarness({
-				workspaceRoot: '/repo',
-				fileExists: fileExistsNoRebase,
-				quickPickSelection: { label: 'main' },
-				git: {
-					...baseGitForSync,
-					'status --porcelain -u': { stdout: '' },
-					'checkout main': { stdout: '' },
-					'pull': { stdout: '' },
-					'checkout feature/my-branch': { stdout: '' },
-					'rebase main': { stdout: '' },
-					'push --force-with-lease': { stdout: '' },
-				},
-			});
-			await runSyncWithUpstreamWorkflow(h.deps);
-
-			assert.ok(h.commands.includes('status --porcelain -u'));
-			assert.ok(!h.commands.includes('stash push -u -m gsp-sync-with-upstream'));
-			assert.ok(h.commands.includes('rebase main'));
-			assert.ok(h.commands.includes('push --force-with-lease'));
-			assert.ok(!h.commands.includes('stash pop') || h.commands.filter((c) => c === 'stash pop').length === 0);
 		});
 
 		test('success path with stash: stashes local changes, then pops after rebase', async () => {
