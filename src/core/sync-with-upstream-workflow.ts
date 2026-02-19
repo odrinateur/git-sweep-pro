@@ -283,11 +283,6 @@ async function runResumeFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 		deps.ui.showInformationMessage(syncMessages.noRebaseNothingToResume);
 		deps.output.appendLine(syncMessages.nothingToResume);
 		return;
-	if (memento && memento.workspaceRoot !== workspaceRoot) {
-		deps.ui.showErrorMessage(
-			'Git Sweep Pro: Un rebase est en cours dans un autre workspace. Ouvrez le bon dossier.'
-		);
-		return;
 	}
 
 	const featureBranch = memento?.featureBranch ?? readRebaseHeadName(gitDir, deps);
@@ -360,7 +355,8 @@ async function runResumeFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 }
 
 export async function runSyncWithUpstreamWorkflow(deps: SyncWithUpstreamDeps): Promise<void> {
-	if (deps.getWorkspaceRoot() && isRebaseInProgress(path.join(deps.getWorkspaceRoot()!, '.git'), deps)) {
+	const workspaceRoot = deps.getWorkspaceRoot();
+	if (workspaceRoot && isRebaseInProgress(path.join(workspaceRoot, '.git'), deps)) {
 		deps.ui.showInformationMessage(syncMessages.rebaseAlreadyInProgress);
 		return;
 	}
