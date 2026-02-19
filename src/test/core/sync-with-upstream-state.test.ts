@@ -6,6 +6,7 @@ import {
 	isRebaseInProgress,
 	MEMENTO_KEY,
 	readRebaseHeadName,
+	resolveGitDir,
 	saveMemento,
 	TEMP_BRANCH_PREFIX,
 	type SyncMemento,
@@ -16,13 +17,14 @@ function createDeps(overrides: {
 	workspaceState?: Partial<SyncWithUpstreamDeps['workspaceState']>;
 	fileExists?: (p: string) => boolean;
 	readFileUtf8?: (p: string) => string;
+	runGitCommand?: SyncWithUpstreamDeps['runGitCommand'];
 } = {}): SyncWithUpstreamDeps {
 	const state = new Map<string, unknown>();
 
 	return {
 		getWorkspaceRoot: () => '/repo',
 		output: { show: () => undefined, appendLine: () => undefined },
-		runGitCommand: async () => ({ stdout: '', stderr: '' }),
+		runGitCommand: overrides.runGitCommand ?? (async () => ({ stdout: '', stderr: '' })),
 		ui: {
 			withProgress: async (_, task) => task(),
 			showQuickPick: async () => undefined,
@@ -100,6 +102,41 @@ suite('sync-with-upstream-state', () => {
 
 			await clearMemento(deps);
 			assert.strictEqual(getMemento(deps), undefined);
+		});
+	});
+
+	suite('resolveGitDir', () => {
+		test('returns git dir path when rev-parse succeeds', async () => {
+			const deps = createDeps({
+				runGitCommand: async (args) => {
+					assert.deepStrictEqual(args, ['rev-parse', '--absolute-git-dir']);
+					return { stdout: '/repo/.git\n', stderr: '' };
+				},
+			});
+			const dir = await resolveGitDir('/repo', deps);
+			assert.strictEqual(dir, '/repo/.git');
+		});
+
+		test('returns worktree git dir when .git is a file (worktree/submodule)', async () => {
+			const worktreeGitDir = '/main-repo/.git/worktrees/my-feature';
+			const deps = createDeps({
+				runGitCommand: async (args) => {
+					assert.deepStrictEqual(args, ['rev-parse', '--absolute-git-dir']);
+					return { stdout: `${worktreeGitDir}\n`, stderr: '' };
+				},
+			});
+			const dir = await resolveGitDir('/worktree/root', deps);
+			assert.strictEqual(dir, worktreeGitDir);
+		});
+
+		test('returns undefined when rev-parse fails (not a git repo)', async () => {
+			const deps = createDeps({
+				runGitCommand: async () => {
+					throw new Error('fatal: not a git repository');
+				},
+			});
+			const dir = await resolveGitDir('/not-a-repo', deps);
+			assert.strictEqual(dir, undefined);
 		});
 	});
 

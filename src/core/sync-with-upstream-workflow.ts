@@ -1,4 +1,3 @@
-import * as path from 'node:path';
 import { parseBranches } from './branch-list';
 import { syncMessages } from './sync-with-upstream-messages';
 import {
@@ -6,6 +5,7 @@ import {
 	getMemento,
 	isRebaseInProgress,
 	readRebaseHeadName,
+	resolveGitDir,
 	saveMemento,
 	TEMP_BRANCH_PREFIX,
 	type SyncWithUpstreamDeps,
@@ -21,8 +21,8 @@ async function runSyncFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 		return;
 	}
 
-	const gitDir = path.join(workspaceRoot, '.git');
-	if (!deps.fileExists(gitDir)) {
+	const gitDir = await resolveGitDir(workspaceRoot, deps);
+	if (!gitDir) {
 		deps.ui.showErrorMessage(syncMessages.notGitRepo);
 		return;
 	}
@@ -89,15 +89,15 @@ async function runSyncFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 		const upstreamRef = targetItem.ref;
 		let hasStash = false;
 
-		try {
-			const stashListBefore = await runGit(['stash', 'list']);
-			await runGit(['stash', 'push', '-u', '-m', 'gsp-sync-with-upstream']);
-			const stashListAfter = await runGit(['stash', 'list']);
-			const countBefore = stashListBefore.stdout.trim().split('\n').filter((l) => l.length > 0).length;
-			const countAfter = stashListAfter.stdout.trim().split('\n').filter((l) => l.length > 0).length;
-			hasStash = countAfter > countBefore;
-		} catch {
-			deps.output.appendLine(syncMessages.infoNoStash);
+		const statusResult = await runGit(['status', '--porcelain', '-u']).catch(() => ({ stdout: '', stderr: '' }));
+		const hasLocalChanges = statusResult.stdout.trim().length > 0;
+		if (hasLocalChanges) {
+			try {
+				await runGit(['stash', 'push', '-u', '-m', 'gsp-sync-with-upstream']);
+				hasStash = true;
+			} catch {
+				deps.output.appendLine(syncMessages.infoNoStash);
+			}
 		}
 
 		let branchToRebaseOnto = upstreamRef;
@@ -265,8 +265,8 @@ async function runResumeFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 		return;
 	}
 
-	const gitDir = path.join(workspaceRoot, '.git');
-	if (!deps.fileExists(gitDir)) {
+	const gitDir = await resolveGitDir(workspaceRoot, deps);
+	if (!gitDir) {
 		deps.ui.showErrorMessage(syncMessages.notGitRepo);
 		return;
 	}
@@ -356,9 +356,12 @@ async function runResumeFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 
 export async function runSyncWithUpstreamWorkflow(deps: SyncWithUpstreamDeps): Promise<void> {
 	const workspaceRoot = deps.getWorkspaceRoot();
-	if (workspaceRoot && isRebaseInProgress(path.join(workspaceRoot, '.git'), deps)) {
-		deps.ui.showInformationMessage(syncMessages.rebaseAlreadyInProgress);
-		return;
+	if (workspaceRoot) {
+		const gitDir = await resolveGitDir(workspaceRoot, deps);
+		if (gitDir && isRebaseInProgress(gitDir, deps)) {
+			deps.ui.showInformationMessage(syncMessages.rebaseAlreadyInProgress);
+			return;
+		}
 	}
 	await runSyncFlow(deps);
 }

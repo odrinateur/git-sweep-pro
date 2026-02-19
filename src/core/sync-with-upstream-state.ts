@@ -26,6 +26,25 @@ export function getMemento(deps: SyncWithUpstreamDeps): SyncMemento | undefined 
 	return deps.workspaceState.get<SyncMemento>(MEMENTO_KEY);
 }
 
+/**
+ * Resolves the actual Git directory path via `git rev-parse --absolute-git-dir`.
+ * Works correctly for worktrees and submodules where `.git` is a file pointing
+ * at the real gitdir rather than a directory.
+ * @returns The absolute path to the .git directory, or undefined if not a git repo
+ */
+export async function resolveGitDir(
+	workspaceRoot: string,
+	deps: SyncWithUpstreamDeps
+): Promise<string | undefined> {
+	try {
+		const result = await deps.runGitCommand(['rev-parse', '--absolute-git-dir'], workspaceRoot);
+		const dir = result.stdout.trim();
+		return dir || undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 export async function saveMemento(deps: SyncWithUpstreamDeps, memento: SyncMemento): Promise<void> {
 	await deps.workspaceState.update(MEMENTO_KEY, memento);
 }
