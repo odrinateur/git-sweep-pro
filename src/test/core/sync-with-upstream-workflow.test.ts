@@ -15,8 +15,10 @@ type HarnessOptions = {
 	workspaceRoot?: string;
 	quickPickSelection?: QuickPickItemLike | undefined;
 	git?: Record<string, GitEntry | GitEntry[]>;
-		/** Return true for .git dir, false for rebase-merge/rebase-apply. Omit to default to false. */
-		fileExists?: (path: string) => boolean;
+	/** Return true for .git dir, false for rebase-merge/rebase-apply. Omit to default to false. */
+	fileExists?: (path: string) => boolean;
+	/** When set, runGitCommand will set .current=true when a rebase (non-continue) command runs. Use with stateful fileExists for conflict tests. */
+	rebaseAttemptedRef?: { current: boolean };
 	readFileUtf8?: (path: string) => string;
 	memento?: SyncMemento | undefined;
 };
@@ -69,6 +71,9 @@ function createHarness(options: HarnessOptions = {}): Harness {
 		},
 		runGitCommand: async (args, _cwd) => {
 			const key = args.join(' ');
+			if (options.rebaseAttemptedRef && key.startsWith('rebase ') && !key.includes('--continue')) {
+				options.rebaseAttemptedRef.current = true;
+			}
 			commands.push(key);
 			const entry = resolveGitEntry(key);
 			if (entry instanceof Error) {
@@ -105,8 +110,8 @@ function createHarness(options: HarnessOptions = {}): Harness {
 	return { deps, outputLines, infoMessages, errorMessages, commands, progressTitles, quickPickRequests, mementoUpdates, mementoGets };
 }
 
-/** Git repo exists, no rebase in progress. Use for sync-flow tests that should proceed past the initial checks. */
-const fileExistsGitOnly = (p: string) => p.endsWith('.git') && !p.includes('rebase');
+/** No rebase in progress. Use for sync-flow tests that should proceed past the initial checks. */
+const fileExistsNoRebase = (p: string) => !p.includes('rebase');
 
 /** Matches git branch -a: simple branch names; parseBranches uses whole line as name. */
 const baseBranchList = [
@@ -162,7 +167,7 @@ suite('sync-with-upstream workflow', () => {
 		test('handles detached HEAD (could not determine branch)', async () => {
 			const h = createHarness({
 				workspaceRoot: '/repo',
-				fileExists: fileExistsGitOnly,
+				fileExists: fileExistsNoRebase,
 				git: {
 					...baseGitForSync,
 					'rev-parse --abbrev-ref HEAD': { stdout: 'HEAD' },
@@ -178,7 +183,7 @@ suite('sync-with-upstream workflow', () => {
 		test('shows info when no branches available for sync', async () => {
 			const h = createHarness({
 				workspaceRoot: '/repo',
-				fileExists: fileExistsGitOnly,
+				fileExists: fileExistsNoRebase,
 				git: {
 					...baseGitForSync,
 					'branch -a': { stdout: '* feature/my-branch\n  remotes/origin/HEAD -> origin/main' },
@@ -193,7 +198,7 @@ suite('sync-with-upstream workflow', () => {
 		test('handles quick-pick cancellation', async () => {
 			const h = createHarness({
 				workspaceRoot: '/repo',
-				fileExists: fileExistsGitOnly,
+				fileExists: fileExistsNoRebase,
 				quickPickSelection: undefined,
 				git: baseGitForSync,
 			});
@@ -207,7 +212,7 @@ suite('sync-with-upstream workflow', () => {
 		test('success path with local branch: fetch, checkout, pull, rebase, force-push', async () => {
 			const h = createHarness({
 				workspaceRoot: '/repo',
-				fileExists: fileExistsGitOnly,
+				fileExists: fileExistsNoRebase,
 				quickPickSelection: { label: 'main' },
 				git: {
 					...baseGitForSync,
@@ -237,7 +242,7 @@ suite('sync-with-upstream workflow', () => {
 		test('success path without stash (nothing to stash)', async () => {
 			const h = createHarness({
 				workspaceRoot: '/repo',
-				fileExists: fileExistsGitOnly,
+				fileExists: fileExistsNoRebase,
 				quickPickSelection: { label: 'main' },
 				git: {
 					...baseGitForSync,
@@ -261,7 +266,7 @@ suite('sync-with-upstream workflow', () => {
 		test('success path with stash: stashes local changes, then pops after rebase', async () => {
 			const h = createHarness({
 				workspaceRoot: '/repo',
-				fileExists: fileExistsGitOnly,
+				fileExists: fileExistsNoRebase,
 				quickPickSelection: { label: 'main' },
 				git: {
 					...baseGitForSync,
@@ -287,7 +292,7 @@ suite('sync-with-upstream workflow', () => {
 		test('success path with remote branch: creates temp branch, pulls, rebases, skips local update when main exists', async () => {
 			const h = createHarness({
 				workspaceRoot: '/repo',
-				fileExists: fileExistsGitOnly,
+				fileExists: fileExistsNoRebase,
 				quickPickSelection: { label: 'origin/main (remote)' },
 				git: {
 					...baseGitForSync,
@@ -315,7 +320,7 @@ suite('sync-with-upstream workflow', () => {
 		test('success path with remote branch: creates local branch when it does not exist', async () => {
 			const h = createHarness({
 				workspaceRoot: '/repo',
-				fileExists: fileExistsGitOnly,
+				fileExists: fileExistsNoRebase,
 				quickPickSelection: { label: 'origin/main (remote)' },
 				git: {
 					...baseGitForSync,
@@ -340,7 +345,7 @@ suite('sync-with-upstream workflow', () => {
 		test('success path with remote branch: skips update when syncing branch equals local upstream', async () => {
 			const h = createHarness({
 				workspaceRoot: '/repo',
-				fileExists: fileExistsGitOnly,
+				fileExists: fileExistsNoRebase,
 				quickPickSelection: { label: 'origin/main (remote)' },
 				git: {
 					...baseGitForSync,
@@ -362,9 +367,12 @@ suite('sync-with-upstream workflow', () => {
 		});
 
 		test('conflict path: rebase fails with conflict, saves memento and pauses', async () => {
+			const rebaseAttemptedRef = { current: false };
 			const h = createHarness({
 				workspaceRoot: '/repo',
-				fileExists: fileExistsGitOnly,
+				rebaseAttemptedRef,
+				fileExists: (p) =>
+					fileExistsNoRebase(p) || (rebaseAttemptedRef.current && (p.includes('rebase-merge') || p.includes('rebase-apply'))),
 				quickPickSelection: { label: 'main' },
 				git: {
 					...baseGitForSync,
@@ -390,7 +398,7 @@ suite('sync-with-upstream workflow', () => {
 		test('push failure path: saves memento and shows resume message', async () => {
 			const h = createHarness({
 				workspaceRoot: '/repo',
-				fileExists: fileExistsGitOnly,
+				fileExists: fileExistsNoRebase,
 				quickPickSelection: { label: 'main' },
 				git: {
 					...baseGitForSync,
@@ -415,7 +423,7 @@ suite('sync-with-upstream workflow', () => {
 		test('maps not-a-git-repository errors to friendly message', async () => {
 			const h = createHarness({
 				workspaceRoot: '/repo',
-				fileExists: fileExistsGitOnly,
+				fileExists: fileExistsNoRebase,
 				git: {
 					'rev-parse --absolute-git-dir': { stdout: '/repo/.git' },
 					'fetch -p': new Error('fatal: not a git repository (or any of the parent directories): .git'),
@@ -430,7 +438,7 @@ suite('sync-with-upstream workflow', () => {
 		test('maps git-not-installed / ENOENT errors to friendly message', async () => {
 			const h = createHarness({
 				workspaceRoot: '/repo',
-				fileExists: fileExistsGitOnly,
+				fileExists: fileExistsNoRebase,
 				git: {
 					'rev-parse --absolute-git-dir': { stdout: '/repo/.git' },
 					'fetch -p': new Error('spawn git ENOENT'),
@@ -444,7 +452,7 @@ suite('sync-with-upstream workflow', () => {
 		test('maps unknown errors to generic failure message', async () => {
 			const h = createHarness({
 				workspaceRoot: '/repo',
-				fileExists: fileExistsGitOnly,
+				fileExists: fileExistsNoRebase,
 				git: {
 					'rev-parse --absolute-git-dir': { stdout: '/repo/.git' },
 					'fetch -p': new Error('mysterious failure'),
@@ -468,7 +476,7 @@ suite('sync-with-upstream workflow', () => {
 		test('shows info when no rebase and no memento', async () => {
 			const h = createHarness({
 				workspaceRoot: '/repo',
-				fileExists: fileExistsGitOnly,
+				fileExists: fileExistsNoRebase,
 				git: { 'rev-parse --absolute-git-dir': { stdout: '/repo/.git' } },
 			});
 			await runSyncWithUpstreamResumeWorkflow(h.deps);
@@ -476,6 +484,28 @@ suite('sync-with-upstream workflow', () => {
 			assert.deepStrictEqual(h.infoMessages, [syncMessages.noRebaseNothingToResume]);
 			assert.ok(h.outputLines.includes(syncMessages.nothingToResume));
 			assert.ok(h.mementoGets.includes(MEMENTO_KEY));
+		});
+
+		test('aborts with rebaseInOtherWorkspace when memento is from different workspace', async () => {
+			const h = createHarness({
+				workspaceRoot: '/other-repo',
+				fileExists: fileExistsNoRebase,
+				memento: {
+					workspaceRoot: '/repo',
+					featureBranch: 'feature/my-branch',
+					hasStash: false,
+					upstreamRef: 'main',
+				},
+				git: { 'rev-parse --absolute-git-dir': { stdout: '/other-repo/.git' } },
+			});
+			await runSyncWithUpstreamResumeWorkflow(h.deps);
+
+			assert.deepStrictEqual(h.errorMessages, [syncMessages.rebaseInOtherWorkspace]);
+			assert.ok(h.outputLines.includes(syncMessages.rebaseInOtherWorkspace));
+			assert.ok(
+				!h.commands.includes('rebase --continue') && !h.commands.includes('push --force-with-lease'),
+				'Should not run resume operations (rebase continue, push)'
+			);
 		});
 
 		test('resume with rebase in progress: continues rebase, push, clears memento', async () => {
@@ -503,7 +533,7 @@ suite('sync-with-upstream workflow', () => {
 		test('resume with memento only (no rebase): skips continue, push, clears memento', async () => {
 			const h = createHarness({
 				workspaceRoot: '/repo',
-				fileExists: fileExistsGitOnly,
+				fileExists: fileExistsNoRebase,
 				memento: {
 					workspaceRoot: '/repo',
 					featureBranch: 'feature/my-branch',
@@ -528,7 +558,7 @@ suite('sync-with-upstream workflow', () => {
 		test('resume with memento and temp branch: cleans up temp branch after push', async () => {
 			const h = createHarness({
 				workspaceRoot: '/repo',
-				fileExists: fileExistsGitOnly,
+				fileExists: fileExistsNoRebase,
 				memento: {
 					workspaceRoot: '/repo',
 					featureBranch: 'feature/my-branch',
@@ -551,7 +581,7 @@ suite('sync-with-upstream workflow', () => {
 		test('resume with hasStash: pops stash after push', async () => {
 			const h = createHarness({
 				workspaceRoot: '/repo',
-				fileExists: fileExistsGitOnly,
+				fileExists: fileExistsNoRebase,
 				memento: {
 					workspaceRoot: '/repo',
 					featureBranch: 'feature/my-branch',
@@ -590,7 +620,7 @@ suite('sync-with-upstream workflow', () => {
 		test('resume errors when memento exists but featureBranch missing and no rebase head', async () => {
 			const h = createHarness({
 				workspaceRoot: '/repo',
-				fileExists: fileExistsGitOnly,
+				fileExists: fileExistsNoRebase,
 				memento: { workspaceRoot: '/repo', featureBranch: '', hasStash: false, upstreamRef: 'main' },
 				git: { 'rev-parse --absolute-git-dir': { stdout: '/repo/.git' } },
 			});
@@ -602,7 +632,7 @@ suite('sync-with-upstream workflow', () => {
 		test('resume shows error when push fails', async () => {
 			const h = createHarness({
 				workspaceRoot: '/repo',
-				fileExists: fileExistsGitOnly,
+				fileExists: fileExistsNoRebase,
 				memento: {
 					workspaceRoot: '/repo',
 					featureBranch: 'feature/my-branch',

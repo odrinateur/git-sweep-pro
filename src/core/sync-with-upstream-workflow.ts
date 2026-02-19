@@ -157,9 +157,7 @@ async function runSyncFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 				() => runGit(['rebase', branchToRebaseOnto])
 			);
 		} catch (rebaseError) {
-			const err = rebaseError as Error & { stderr?: string };
-			const msg = [err.message, err.stderr ?? ''].join(' ').toLowerCase();
-			const isConflict = msg.includes('conflict') || msg.includes('could not apply');
+			const isConflict = isRebaseInProgress(gitDir, deps);
 
 			if (isConflict) {
 				await saveMemento(deps, {
@@ -295,12 +293,14 @@ async function runSyncFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 		const message = error instanceof Error ? error.message : String(error);
 		const lowerMessage = message.toLowerCase();
 
-		if (lowerMessage.includes('not a git repository')) {
-			deps.ui.showErrorMessage(syncMessages.notGitRepo);
-		} else if (lowerMessage.includes('command not found') || lowerMessage.includes('enoent')) {
-			deps.ui.showErrorMessage(syncMessages.gitNotInstalled);
-		} else {
-			deps.ui.showErrorMessage(syncMessages.errorGeneric(message));
+		if (!skipOuterCleanup) {
+			if (lowerMessage.includes('not a git repository')) {
+				deps.ui.showErrorMessage(syncMessages.notGitRepo);
+			} else if (lowerMessage.includes('command not found') || lowerMessage.includes('enoent')) {
+				deps.ui.showErrorMessage(syncMessages.gitNotInstalled);
+			} else {
+				deps.ui.showErrorMessage(syncMessages.errorGeneric(message));
+			}
 		}
 		deps.output.appendLine(`[error] ${message}`);
 		deps.output.appendLine(syncMessages.outputFailed);
@@ -327,6 +327,12 @@ async function runResumeFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 
 	const rebaseActive = isRebaseInProgress(gitDir, deps);
 	const memento = getMemento(deps);
+
+	if (memento && memento.workspaceRoot !== workspaceRoot) {
+		deps.ui.showErrorMessage(syncMessages.rebaseInOtherWorkspace);
+		deps.output.appendLine(syncMessages.rebaseInOtherWorkspace);
+		return;
+	}
 
 	if (!rebaseActive && !memento) {
 		deps.ui.showInformationMessage(syncMessages.noRebaseNothingToResume);

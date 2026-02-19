@@ -9,7 +9,7 @@ export type SyncMemento = {
 	readonly featureBranch: string;
 	readonly hasStash: boolean;
 	readonly upstreamRef: string;
-	/** Branche temporaire à supprimer après reprise (cas branche distante). */
+	/** Temporary branch to delete after recovery (remote branch case). */
 	readonly tempBranchToCleanup?: string;
 };
 
