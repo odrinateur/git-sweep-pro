@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import { parseBranches } from './branch-list';
+import { syncMessages } from './sync-with-upstream-messages';
 import {
 	clearMemento,
 	getMemento,
@@ -16,25 +17,25 @@ import type { QuickPickItemLike } from './sweep-workflow';
 async function runSyncFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 	const workspaceRoot = deps.getWorkspaceRoot();
 	if (!workspaceRoot) {
-		deps.ui.showErrorMessage('Git Sweep Pro: Aucun dossier de workspace ouvert.');
+		deps.ui.showErrorMessage(syncMessages.noWorkspace);
 		return;
 	}
 
 	const gitDir = path.join(workspaceRoot, '.git');
 	if (!deps.fileExists(gitDir)) {
-		deps.ui.showErrorMessage('Git Sweep Pro: Ce dossier n\'est pas un dépôt Git.');
+		deps.ui.showErrorMessage(syncMessages.notGitRepo);
 		return;
 	}
 
 	deps.output.show(true);
-	deps.output.appendLine('--- Sync With Upstream ---');
+	deps.output.appendLine(syncMessages.outputHeader);
 	deps.output.appendLine(`Workspace: ${workspaceRoot}`);
 
 	const runGit = (args: string[]) => deps.runGitCommand(args, workspaceRoot);
 
 	try {
 		await deps.ui.withProgress(
-			{ title: 'Git Sweep Pro: Récupération des remotes...' },
+			{ title: syncMessages.fetchingRemotes },
 			() => runGit(['fetch', '-p'])
 		);
 
@@ -45,17 +46,13 @@ async function runSyncFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 
 		const featureBranch = currentBranchResult.stdout.trim();
 		if (!featureBranch || featureBranch === 'HEAD') {
-			deps.ui.showErrorMessage(
-				'Git Sweep Pro: Impossible de déterminer la branche actuelle (HEAD détaché ?).'
-			);
+			deps.ui.showErrorMessage(syncMessages.couldNotDetermineBranch);
 			return;
 		}
 
 		const branchItems = parseBranches(branchListResult.stdout);
 		if (branchItems.length === 0) {
-			deps.ui.showInformationMessage(
-				'Git Sweep Pro: Aucune autre branche disponible pour la synchronisation.'
-			);
+			deps.ui.showInformationMessage(syncMessages.noBranchesForSync);
 			return;
 		}
 
@@ -69,14 +66,14 @@ async function runSyncFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 			canPickMany: false,
 			ignoreFocusOut: true,
 			matchOnDescription: true,
-			title: 'Sync With Upstream: Choisir la branche à synchroniser',
-			placeHolder: 'Branche locale ou distante',
+			title: syncMessages.pickBranchTitle,
+			placeHolder: syncMessages.pickBranchPlaceholder,
 		});
 
 		const selectedItem: QuickPickItemLike | undefined =
 			selected === undefined || Array.isArray(selected) ? undefined : (selected as QuickPickItemLike);
 		if (!selectedItem) {
-			deps.output.appendLine('Opération annulée.');
+			deps.output.appendLine(syncMessages.operationCancelled);
 			return;
 		}
 
@@ -96,7 +93,7 @@ async function runSyncFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 			const stashResult = await runGit(['stash', 'push', '-u', '-m', 'gsp-sync-with-upstream']);
 			hasStash = !stashResult.stdout.includes('No local changes to save');
 		} catch {
-			deps.output.appendLine('[info] Aucun changement à stasher.');
+			deps.output.appendLine(syncMessages.infoNoStash);
 		}
 
 		let branchToRebaseOnto = upstreamRef;
@@ -107,7 +104,7 @@ async function runSyncFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 			const tempBranch = `${TEMP_BRANCH_PREFIX}${safeSuffix}`;
 
 			await deps.ui.withProgress(
-				{ title: `Git Sweep Pro: Création branche temporaire sur ${upstreamRef}...` },
+				{ title: syncMessages.creatingTempBranch(upstreamRef) },
 				() => runGit(['checkout', '-B', tempBranch, upstreamRef])
 			);
 
@@ -116,38 +113,38 @@ async function runSyncFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 				const remoteName = upstreamRef.slice(0, slashIdx);
 				const branchName = upstreamRef.slice(slashIdx + 1);
 				await deps.ui.withProgress(
-					{ title: `Git Sweep Pro: Pull sur ${upstreamRef}...` },
+					{ title: syncMessages.pulling(upstreamRef) },
 					() => runGit(['pull', remoteName, branchName])
 				);
 			} catch {
-				deps.output.appendLine('[info] Pull ignoré (déjà à jour ou sans upstream).');
+				deps.output.appendLine(syncMessages.infoPullSkipped);
 			}
 
 			branchToRebaseOnto = tempBranch;
 		} else {
 			await deps.ui.withProgress(
-				{ title: `Git Sweep Pro: Checkout ${upstreamRef}...` },
+				{ title: syncMessages.checkingOut(upstreamRef) },
 				() => runGit(['checkout', upstreamRef])
 			);
 
 			try {
 				await deps.ui.withProgress(
-					{ title: `Git Sweep Pro: Pull sur ${upstreamRef}...` },
+					{ title: syncMessages.pulling(upstreamRef) },
 					() => runGit(['pull'])
 				);
 			} catch {
-				deps.output.appendLine('[info] Pull ignoré.');
+				deps.output.appendLine(syncMessages.infoPullSkippedLocal);
 			}
 		}
 
 		await deps.ui.withProgress(
-			{ title: `Git Sweep Pro: Retour sur ${featureBranch}...` },
+			{ title: syncMessages.returningTo(featureBranch) },
 			() => runGit(['checkout', featureBranch])
 		);
 
 		try {
 			await deps.ui.withProgress(
-				{ title: `Git Sweep Pro: Rebase sur ${upstreamRef}...` },
+				{ title: syncMessages.rebasing(upstreamRef) },
 				() => runGit(['rebase', branchToRebaseOnto])
 			);
 		} catch (rebaseError) {
@@ -163,10 +160,8 @@ async function runSyncFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 					upstreamRef,
 					...(isRemote && { tempBranchToCleanup: branchToRebaseOnto }),
 				});
-				deps.ui.showInformationMessage(
-					'Git Sweep Pro: Conflits de rebase. Résolvez-les, puis exécutez "Sync With Upstream: Reprendre" pour continuer.'
-				);
-				deps.output.appendLine('--- Rebase en pause (conflits) ---');
+				deps.ui.showInformationMessage(syncMessages.rebaseConflicts);
+				deps.output.appendLine(syncMessages.outputRebasePaused);
 				return;
 			}
 			throw rebaseError;
@@ -174,12 +169,12 @@ async function runSyncFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 
 		try {
 			await deps.ui.withProgress(
-				{ title: 'Git Sweep Pro: Force push...' },
+				{ title: syncMessages.forcePush },
 				() => runGit(['push', '--force-with-lease'])
 			);
 		} catch (pushError) {
 			const msg = pushError instanceof Error ? pushError.message : String(pushError);
-			deps.ui.showErrorMessage(`Git Sweep Pro: Échec du push: ${msg}`);
+			deps.ui.showErrorMessage(syncMessages.pushFailed(msg));
 			await runGit(['rebase', '--abort']).catch(() => {});
 			throw pushError;
 		}
@@ -188,65 +183,63 @@ async function runSyncFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 			try {
 				await runGit(['branch', '-D', branchToRebaseOnto]);
 			} catch {
-				deps.output.appendLine(`[info] Branche temporaire ${branchToRebaseOnto} non supprimée.`);
+				deps.output.appendLine(syncMessages.infoTempBranchNotDeleted(branchToRebaseOnto));
 			}
 			const slashIdx = upstreamRef.indexOf('/');
 			const localUpstream = slashIdx > 0 ? upstreamRef.slice(slashIdx + 1) : upstreamRef;
 			try {
 				await runGit(['branch', '-f', localUpstream, upstreamRef]);
-				deps.output.appendLine(`Branche locale ${localUpstream} synchronisée avec ${upstreamRef}.`);
+				deps.output.appendLine(syncMessages.infoLocalBranchSynced(localUpstream, upstreamRef));
 			} catch {
-				deps.output.appendLine(`[info] Mise à jour de ${localUpstream} ignorée.`);
+				deps.output.appendLine(syncMessages.infoUpdateSkipped(localUpstream));
 			}
 		}
 
 		if (hasStash) {
 			try {
 				await deps.ui.withProgress(
-					{ title: 'Git Sweep Pro: Récupération du stash...' },
+					{ title: syncMessages.recoveringStash },
 					() => runGit(['stash', 'pop'])
 				);
 			} catch (popError) {
-				deps.ui.showErrorMessage(
-					`Git Sweep Pro: Le rebase a réussi mais stash pop a échoué. Utilisez "git stash pop" manuellement.`
-				);
+				deps.ui.showErrorMessage(syncMessages.rebaseOkStashFailed);
 				deps.output.appendLine(`[stash-pop-error] ${popError}`);
 			}
 		}
 
-		deps.output.appendLine('--- Sync With Upstream terminé ---');
-		deps.ui.showInformationMessage(`Git Sweep Pro: ${featureBranch} synchronisée avec ${upstreamRef}.`);
+		deps.output.appendLine(syncMessages.outputComplete);
+		deps.ui.showInformationMessage(syncMessages.syncedWith(featureBranch, upstreamRef));
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		const lowerMessage = message.toLowerCase();
 
 		if (lowerMessage.includes('not a git repository')) {
-			deps.ui.showErrorMessage('Git Sweep Pro: Ce dossier n\'est pas un dépôt Git.');
+			deps.ui.showErrorMessage(syncMessages.notGitRepo);
 		} else if (lowerMessage.includes('command not found') || lowerMessage.includes('enoent')) {
-			deps.ui.showErrorMessage('Git Sweep Pro: Git n\'est pas installé ou pas dans le PATH.');
+			deps.ui.showErrorMessage(syncMessages.gitNotInstalled);
 		} else {
-			deps.ui.showErrorMessage(`Git Sweep Pro: ${message}`);
+			deps.ui.showErrorMessage(syncMessages.errorGeneric(message));
 		}
 		deps.output.appendLine(`[error] ${message}`);
-		deps.output.appendLine('--- Sync With Upstream échoué ---');
+		deps.output.appendLine(syncMessages.outputFailed);
 	}
 }
 
 async function runResumeFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 	const workspaceRoot = deps.getWorkspaceRoot();
 	if (!workspaceRoot) {
-		deps.ui.showErrorMessage('Git Sweep Pro: Aucun dossier de workspace ouvert.');
+		deps.ui.showErrorMessage(syncMessages.noWorkspace);
 		return;
 	}
 
 	const gitDir = path.join(workspaceRoot, '.git');
 	if (!deps.fileExists(gitDir)) {
-		deps.ui.showErrorMessage('Git Sweep Pro: Ce dossier n\'est pas un dépôt Git.');
+		deps.ui.showErrorMessage(syncMessages.notGitRepo);
 		return;
 	}
 
 	deps.output.show(true);
-	deps.output.appendLine('--- Sync With Upstream: Reprise ---');
+	deps.output.appendLine(syncMessages.outputResumeHeader);
 
 	const runGit = (args: string[]) => deps.runGitCommand(args, workspaceRoot);
 
@@ -254,25 +247,19 @@ async function runResumeFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 	const memento = getMemento(deps);
 
 	if (!rebaseActive && !memento) {
-		deps.ui.showInformationMessage(
-			'Git Sweep Pro: Aucun rebase en cours et aucun état sauvegardé. Rien à reprendre.'
-		);
-		deps.output.appendLine('Rien à reprendre.');
+		deps.ui.showInformationMessage(syncMessages.noRebaseNothingToResume);
+		deps.output.appendLine(syncMessages.nothingToResume);
 		return;
 	}
 
 	if (rebaseActive && memento && memento.workspaceRoot !== workspaceRoot) {
-		deps.ui.showErrorMessage(
-			'Git Sweep Pro: Un rebase est en cours dans un autre workspace. Ouvrez le bon dossier.'
-		);
+		deps.ui.showErrorMessage(syncMessages.rebaseInOtherWorkspace);
 		return;
 	}
 
 	const featureBranch = memento?.featureBranch ?? readRebaseHeadName(gitDir, deps);
 	if (!featureBranch) {
-		deps.ui.showErrorMessage(
-			'Git Sweep Pro: Impossible de déterminer la branche en cours de rebase.'
-		);
+		deps.ui.showErrorMessage(syncMessages.couldNotDetermineRebaseBranch);
 		return;
 	}
 
@@ -282,36 +269,34 @@ async function runResumeFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 	if (rebaseActive) {
 		try {
 			await deps.ui.withProgress(
-				{ title: 'Git Sweep Pro: Rebase --continue...' },
+				{ title: syncMessages.rebaseContinue },
 				() => runGit(['rebase', '--continue'])
 			);
 		} catch (continueError) {
 			const msg = continueError instanceof Error ? continueError.message : String(continueError);
 			if (msg.toLowerCase().includes('conflict') || msg.toLowerCase().includes('could not apply')) {
-				deps.ui.showErrorMessage(
-					'Git Sweep Pro: Conflits restants. Résolvez-les puis rappelez "Sync With Upstream: Reprendre".'
-				);
+				deps.ui.showErrorMessage(syncMessages.remainingConflicts);
 				deps.output.appendLine(`[error] ${msg}`);
 				return;
 			}
-			deps.ui.showErrorMessage(`Git Sweep Pro: ${msg}`);
+			deps.ui.showErrorMessage(syncMessages.errorGeneric(msg));
 			deps.output.appendLine(`[error] ${msg}`);
 			return;
 		}
 	} else {
-		deps.output.appendLine(
-			'[info] Aucun rebase en cours (déjà terminé manuellement ?). Passage au push et au nettoyage.'
-		);
+		deps.output.appendLine(syncMessages.infoNoRebaseInProgress);
 	}
 
 	try {
 		await deps.ui.withProgress(
-			{ title: 'Git Sweep Pro: Force push...' },
+			{ title: syncMessages.forcePush },
 			() => runGit(['push', '--force-with-lease'])
 		);
 	} catch (pushError) {
 		deps.ui.showErrorMessage(
-			`Git Sweep Pro: Rebase OK mais push échoué: ${pushError instanceof Error ? pushError.message : pushError}`
+			syncMessages.rebaseOkPushFailed(
+				pushError instanceof Error ? pushError.message : String(pushError)
+			)
 		);
 		throw pushError;
 	}
@@ -320,34 +305,30 @@ async function runResumeFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 		try {
 			await runGit(['branch', '-D', tempBranchToCleanup]);
 		} catch {
-			deps.output.appendLine(`[info] Branche temporaire ${tempBranchToCleanup} non supprimée.`);
+			deps.output.appendLine(syncMessages.infoTempBranchNotDeleted(tempBranchToCleanup));
 		}
 	}
 
 	if (hasStash) {
 		try {
 			await deps.ui.withProgress(
-				{ title: 'Git Sweep Pro: Récupération du stash...' },
+				{ title: syncMessages.recoveringStash },
 				() => runGit(['stash', 'pop'])
 			);
 		} catch (popError) {
-			deps.ui.showErrorMessage(
-				'Git Sweep Pro: Le stash n\'a pas pu être récupéré. Utilisez "git stash pop" manuellement.'
-			);
+			deps.ui.showErrorMessage(syncMessages.stashPopFailed);
 			deps.output.appendLine(`[stash-pop-error] ${popError}`);
 		}
 	}
 
 	await clearMemento(deps);
-	deps.output.appendLine('--- Reprise terminée ---');
-	deps.ui.showInformationMessage(`Git Sweep Pro: ${featureBranch} synchronisée avec succès.`);
+	deps.output.appendLine(syncMessages.outputResumeComplete);
+	deps.ui.showInformationMessage(syncMessages.syncedSuccess(featureBranch));
 }
 
 export async function runSyncWithUpstreamWorkflow(deps: SyncWithUpstreamDeps): Promise<void> {
 	if (deps.getWorkspaceRoot() && isRebaseInProgress(path.join(deps.getWorkspaceRoot()!, '.git'), deps)) {
-		deps.ui.showInformationMessage(
-			'Git Sweep Pro: Un rebase est déjà en cours. Utilisez "Sync With Upstream: Reprendre" pour continuer.'
-		);
+		deps.ui.showInformationMessage(syncMessages.rebaseAlreadyInProgress);
 		return;
 	}
 	await runSyncFlow(deps);
