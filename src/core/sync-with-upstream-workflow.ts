@@ -178,8 +178,37 @@ async function runSyncFlow(deps: SyncWithUpstreamDeps): Promise<void> {
 			);
 		} catch (pushError) {
 			const msg = pushError instanceof Error ? pushError.message : String(pushError);
+
+			let memento = {
+				workspaceRoot,
+				featureBranch,
+				hasStash,
+				upstreamRef,
+				...(isRemote && { tempBranchToCleanup: branchToRebaseOnto }),
+			};
+			await saveMemento(deps, memento);
+			deps.output.appendLine(syncMessages.infoStateSavedForResume);
+
+			if (hasStash) {
+				try {
+					await runGit(['stash', 'pop']);
+					memento = { ...memento, hasStash: false };
+					await saveMemento(deps, memento);
+				} catch {
+					/* noop */
+				}
+			}
+			if (isRemote && branchToRebaseOnto) {
+				try {
+					await runGit(['branch', '-D', branchToRebaseOnto]);
+					memento = { ...memento, tempBranchToCleanup: undefined };
+					await saveMemento(deps, memento);
+				} catch {
+					/* noop */
+				}
+			}
+
 			deps.ui.showErrorMessage(syncMessages.pushFailed(msg));
-			await runGit(['rebase', '--abort']).catch(() => {});
 			throw pushError;
 		}
 

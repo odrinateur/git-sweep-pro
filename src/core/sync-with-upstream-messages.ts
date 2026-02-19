@@ -25,7 +25,8 @@ export const syncMessages = {
 	forcePush: `${PREFIX} Force push...`,
 	recoveringStash: `${PREFIX} Recovering stash...`,
 	rebaseConflicts: `${PREFIX} Rebase conflicts. Resolve them, then run "Sync With Upstream (Resume)" to continue.`,
-	pushFailed: (msg: string) => `${PREFIX} Push failed: ${msg}`,
+	pushFailed: (msg: string) =>
+		`${PREFIX} Push failed: ${msg}. Run "Sync With Upstream (Resume)" to retry.`,
 	rebaseOkStashFailed: `${PREFIX} Rebase succeeded but stash pop failed. Use "git stash pop" manually.`,
 	stashPopFailed: `${PREFIX} Stash could not be recovered. Use "git stash pop" manually.`,
 	syncedWith: (branch: string, upstream: string) => `${PREFIX} ${branch} synced with ${upstream}.`,
@@ -56,4 +57,5 @@ export const syncMessages = {
 	infoUpdateSkipped: (branch: string) => `[info] Update of ${branch} skipped.`,
 	infoNoRebaseInProgress:
 		'[info] No rebase in progress (already completed manually?). Proceeding to push and cleanup.',
+	infoStateSavedForResume: '[info] State saved. Run "Sync With Upstream (Resume)" to retry push.',
 } as const;
